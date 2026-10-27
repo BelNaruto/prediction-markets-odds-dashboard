@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prediction Markets Odds Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{--bg:#0b1e4a;--card:#12285c;--ink:#eaf1ff;--mut:#9db4e6;--acc:#2ee59d;--bad:#ff5c7a}
+  *{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+  main{max-width:960px;margin:0 auto;padding:24px 16px}h1{margin:0 0 4px}p.sub{color:var(--mut);margin:0 0 20px}
+  form{display:flex;gap:8px;margin-bottom:20px}input{flex:1;padding:12px;border-radius:8px;border:0;font-size:16px}
+  button{padding:12px 18px;border:0;border-radius:8px;background:var(--acc);font-weight:700;cursor:pointer}
+  .card{background:var(--card);border-radius:12px;padding:16px;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-bottom:1px solid #ffffff22}
+  .big{font-size:42px;font-weight:800;color:var(--acc)}.mut{color:var(--mut)}a{color:var(--acc)}
+  tr.row{cursor:pointer}tr.row:hover{background:#ffffff10}
+</style>
+</head>
+<body>
+<main>
+  <h1>Prediction Markets Dashboard</h1>
+  <p class="sub">Polymarket · Kalshi · Manifold side by side. Powered by the
+    <a href="https://rapidapi.com/belchiorarkad-FqvHs2EDOtP/api/prediction-markets">Prediction Markets API</a>.
+    Support: Telegram <a href="https://t.me/pintoflow">@pintoflow</a></p>
+  <form id="f"><input id="q" placeholder="Search a topic: fed rate cut, bitcoin, election..." value="fed rate cut"><button>Search</button></form>
+  <div class="card" id="cons" hidden><div class="mut">Consensus fair value (volume-weighted)</div><div class="big" id="consP"></div><div class="mut" id="consS"></div></div>
+  <div class="card" id="mk" hidden><table><thead><tr><th>Venue</th><th>Market</th><th>Yes</th><th>Volume</th></tr></thead><tbody id="rows"></tbody></table></div>
+  <div class="card" id="ch" hidden><div class="mut" id="chT"></div><canvas id="c" height="110"></canvas></div>
+  <p class="mut" id="msg"></p>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const get = async (p) => { const r = await fetch(p); const b = await r.json(); if (b.error) throw new Error(b.message); return b.data; };
+const pct = (p) => (p * 100).toFixed(1) + '%';
+let chart;
+
+async function search(q) {
+  $('msg').textContent = 'Loading...';
+  ['cons','mk','ch'].forEach((i) => ($(i).hidden = true));
+  try {
+    const enc = encodeURIComponent(q);
+    const [markets, cons] = await Promise.all([get(`/api/markets?q=${enc}&limit=8`), get(`/api/consensus?q=${enc}`).catch(() => null)]);
+    if (cons) { $('consP').textContent = pct(cons.consensus.probability); $('consS').textContent = `${cons.agreement.venuesMatched} venues, spread ${cons.agreement.spreadPct}%`; $('cons').hidden = false; }
+    $('rows').innerHTML = '';
+    for (const m of markets.markets) {
+      const yes = (m.outcomes.find((o) => o.name === 'Yes') || m.outcomes[0]).odds.probability;
+      const tr = document.createElement('tr'); tr.className = 'row';
+      tr.innerHTML = `<td>${m.venue}</td><td>${m.title.replace(/</g,'&lt;')}</td><td>${pct(yes)}</td><td>$${Math.round(m.volume || 0).toLocaleString()}</td>`;
+      tr.onclick = () => history(m);
+      $('rows').appendChild(tr);
+    }
+    $('mk').hidden = !markets.markets.length; $('msg').textContent = markets.markets.length ? 'Click a market for its 30-day price history.' : 'No markets found.';
+  } catch (e) { $('msg').textContent = 'Error: ' + e.message; }
+}
+
+async function history(m) {
+  try {
+    const d = await get(`/api/history/${m.venue}/${encodeURIComponent(m.venue === 'kalshi' ? m.ticker : m.id)}?interval=1d&lookback=30d`);
+    $('chT').textContent = `${m.title} - Yes probability, daily`; $('ch').hidden = false;
+    if (chart) chart.destroy();
+    chart = new Chart($('c'), { type: 'line', data: { labels: d.candles.map((c) => c.time.slice(5, 10)), datasets: [{ data: d.candles.map((c) => c.c), borderColor: '#2ee59d', tension: .25, pointRadius: 0 }] },
+      options: { plugins: { legend: { display: false } }, scales: { y: { min: 0, max: 1, ticks: { color: '#9db4e6' } }, x: { ticks: { color: '#9db4e6' } } } } });
+  } catch (e) { $('msg').textContent = 'History error: ' + e.message; }
+}
+$('f').onsubmit = (e) => { e.preventDefault(); search($('q').value); };
+search($('q').value);
+</script>
+</body>
+</html>
